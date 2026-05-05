@@ -6,18 +6,21 @@
 <title>Prof Vigilante</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body {
-  background: #1a1a2e;
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; min-height: 100vh;
-  font-family: 'Courier New', monospace; overflow: hidden;
+html, body {
+  width: 100%; height: 100%;
+  background: #1a1a2e; overflow: hidden;
+  font-family: 'Courier New', monospace;
   touch-action: none;
 }
-#wrap { position: relative; display: flex; flex-direction: column; align-items: center; }
+body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+#wrap {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  width: 100%;
+}
 #ui {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
   padding: 5px 10px; background: #16213e; color: #ccc; font-size: 0.82rem; gap: 6px;
-  border-bottom: 2px solid #0f3460;
+  border-bottom: 2px solid #0f3460; flex-shrink: 0;
 }
 #ui .val { color: #f5c518; font-weight: bold; }
 #ui button {
@@ -40,22 +43,37 @@ canvas { display: block; }
 }
 #ov button:hover { background: #ff5555; }
 #cred { font-size: 0.6rem; color: #555; margin-top: 6px; text-align:center; }
+/* Portrait warning */
+#portrait-msg {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: #1a1a2e; color: #f5c518;
+  flex-direction: column; align-items: center; justify-content: center;
+  font-size: 1.5rem; text-align: center; padding: 30px; gap: 16px;
+  line-height: 1.6;
+}
+#portrait-msg span { font-size: 3rem; }
+@media (pointer:coarse) and (orientation:portrait) { #portrait-msg { display: flex; } }
 /* Touch bust button */
 #bustBtn {
-  display: none;
-  width: min(92vw, 360px); height: 62px;
+  display: none; flex-shrink: 0;
+  width: min(96vw, 400px); height: 58px;
   background: #c62828; border: none; border-radius: 18px;
-  color: #fff; font-weight: bold; font-family: inherit; font-size: 1.35rem;
-  letter-spacing: 1px; cursor: pointer; margin-top: 8px;
+  color: #fff; font-weight: bold; font-family: inherit; font-size: 1.3rem;
+  letter-spacing: 1px; cursor: pointer; margin-top: 6px;
   box-shadow: 0 5px 0 #7b0000, 0 0 22px rgba(232,64,64,0.45);
   user-select: none; -webkit-user-select: none; touch-action: manipulation;
   transition: transform 0.08s, box-shadow 0.08s;
 }
 #bustBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 #7b0000; }
 @media (pointer:coarse) { #bustBtn { display: block; } }
+@media (pointer:coarse) and (orientation:landscape) { #bustBtn { height: 46px; font-size: 1.1rem; margin-top: 3px; } }
 </style>
 </head>
 <body>
+<div id="portrait-msg">
+  <span>📱↔️</span>
+  Ruota il telefono per<br>giocare meglio!
+</div>
 <div id="wrap">
   <div id="ui">
     <div>🏆 <span class="val" id="sc">0</span></div>
@@ -87,16 +105,19 @@ const W = 540, H = 470;
 cv.width = W; cv.height = H;
 const isTouch = ()=>window.matchMedia('(pointer:coarse)').matches;
 function scaleIt(){
-  const uiH  = document.getElementById('ui').offsetHeight   || 42;
-  const btnH = isTouch() ? (document.getElementById('bustBtn').offsetHeight || 70) + 16 : 0;
-  const mw   = Math.min(window.innerWidth,  600);
-  const mh   = window.innerHeight - uiH - btnH - 6;
-  const s    = Math.min(mw/W, mh/H, 1);
-  cv.style.width  = (W*s)+'px';
-  cv.style.height = (H*s)+'px';
+  const landscape = window.innerWidth >= window.innerHeight;
+  const uiH  = document.getElementById('ui').offsetHeight || 42;
+  const btnEl= document.getElementById('bustBtn');
+  const btnH = (isTouch() && landscape) ? (btnEl.offsetHeight || 52) + 10 : 0;
+  const vw   = window.innerWidth;
+  const vh   = window.innerHeight - uiH - btnH - 2;
+  const s    = Math.min(vw / W, vh / H); // nessun cap: riempie tutto lo schermo
+  cv.style.width  = (W * s) + 'px';
+  cv.style.height = (H * s) + 'px';
 }
 scaleIt();
 window.addEventListener('resize', scaleIt);
+window.addEventListener('orientationchange', ()=>setTimeout(scaleIt, 120));
 
 // ── Audio ─────────────────────────────────────────────────────────────────────
 const AC = new (window.AudioContext || window.webkitAudioContext)();
@@ -125,18 +146,18 @@ function stopAllMusic(){
   gameMusic.pause();  gameMusic.currentTime  = 0;
 }
 
-// First user interaction → sblocca AudioContext e avvia musica intro
-function onFirstInteraction(){
+// Prima interazione utente → sblocca AudioContext e avvia musica intro.
+// Listener persistente (non once:true) per gestire correttamente ogni scenario.
+function ensureAudio(){
   if(musicReady) return;
   musicReady = true;
   wake();
-  if(gs==='title'||gs==='over'||gs==='win'||gs==='next') introMusic.play().catch(()=>{});
-  else if(gs==='playing') gameMusic.play().catch(()=>{});
-  ['click','touchstart','keydown'].forEach(e=>document.removeEventListener(e, onFirstInteraction));
+  if(gs==='playing') gameMusic.play().catch(()=>{});
+  else               introMusic.play().catch(()=>{});
 }
-['click','touchstart','keydown'].forEach(e=>
-  document.addEventListener(e, onFirstInteraction, {passive:true, once:true})
-);
+document.addEventListener('click',      ensureAudio);
+document.addEventListener('touchstart', ensureAudio, {passive:true});
+document.addEventListener('keydown',    ensureAudio);
 
 function wake(){ if(AC.state==='suspended') AC.resume(); }
 function tone(f, d, type='square', v=0.16, delay=0){
