@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Prof Vigilante</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #1a1a2e;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; min-height: 100vh;
+  font-family: 'Courier New', monospace; overflow: hidden;
+  touch-action: none;
+}
+#wrap { position: relative; display: flex; flex-direction: column; align-items: center; }
+#ui {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px; background: #16213e; color: #ccc; font-size: 0.82rem; gap: 6px;
+  border-bottom: 2px solid #0f3460;
+}
+#ui .val { color: #f5c518; font-weight: bold; }
+#ui button {
+  background: #0f3460; color: #fff; border: 1px solid #4fc3f7;
+  border-radius: 4px; padding: 2px 7px; cursor: pointer; font-size: 0.75rem;
+}
+canvas { display: block; }
+/* Overlay */
+#ov {
+  display: none; position: absolute; inset: 0;
+  background: rgba(10,10,30,0.88); flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; z-index: 30;
+}
+#ov.show { display: flex; }
+#ov h1 { font-size: 1.9rem; color: #f5c518; text-shadow: 2px 2px 0 #c00; text-align:center; }
+#ov .sub { font-size: 0.85rem; color: #bbb; text-align: center; max-width: 320px; line-height:1.5; }
+#ov button {
+  background: #e84040; color: #fff; border: none; border-radius: 8px;
+  padding: 10px 30px; font-size: 1rem; font-family: inherit; cursor: pointer; margin-top:4px;
+}
+#ov button:hover { background: #ff5555; }
+#cred { font-size: 0.6rem; color: #555; margin-top: 6px; text-align:center; }
+/* Touch bust button */
+#bustBtn {
+  display: none;
+  width: min(92vw, 360px); height: 62px;
+  background: #c62828; border: none; border-radius: 18px;
+  color: #fff; font-weight: bold; font-family: inherit; font-size: 1.35rem;
+  letter-spacing: 1px; cursor: pointer; margin-top: 8px;
+  box-shadow: 0 5px 0 #7b0000, 0 0 22px rgba(232,64,64,0.45);
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+#bustBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 #7b0000; }
+@media (pointer:coarse) { #bustBtn { display: block; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="ui">
+    <div>🏆 <span class="val" id="sc">0</span></div>
+    <div>LV <span class="val" id="lv">1</span>/5</div>
+    <div>❤ <span class="val" id="li">5</span></div>
+    <div>⏱ <span class="val" id="ti">60</span>s</div>
+    <button id="mute">🔊</button>
+  </div>
+  <canvas id="c"></canvas>
+  <button id="bustBtn">🚨 BECCA! 🚨</button>
+  <div id="ov" class="show">
+    <h1>👨‍🏫 PROF VIGILANTE</h1>
+    <div class="sub">
+      📱 <b>Touch:</b> tocca un banco per muoverti,<br>
+      poi premi <b>BECCA!</b> per coglierlo in flagrante<br>
+      ⌨️ <b>PC:</b> frecce direzionali + <b>SPAZIO</b><br>
+      Non lasciar copiare nessuno!
+    </div>
+    <button id="startBtn">INIZIA LA VERIFICA!</button>
+    <div id="cred">Gioco sviluppato da Antonio Moliterni (Ananasso Malvagio)</div>
+  </div>
+</div>
+
+<script>
+// ── Canvas ────────────────────────────────────────────────────────────────────
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const W = 540, H = 470;
+cv.width = W; cv.height = H;
+const isTouch = ()=>window.matchMedia('(pointer:coarse)').matches;
+function scaleIt(){
+  const uiH  = document.getElementById('ui').offsetHeight   || 42;
+  const btnH = isTouch() ? (document.getElementById('bustBtn').offsetHeight || 70) + 16 : 0;
+  const mw   = Math.min(window.innerWidth,  600);
+  const mh   = window.innerHeight - uiH - btnH - 6;
+  const s    = Math.min(mw/W, mh/H, 1);
+  cv.style.width  = (W*s)+'px';
+  cv.style.height = (H*s)+'px';
+}
+scaleIt();
+window.addEventListener('resize', scaleIt);
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
+const AC = new (window.AudioContext || window.webkitAudioContext)();
+let muted = false;
+// ── MP3 music tracks ──────────────────────────────────────────────────────────
+const introMusic = new Audio('evil intro.mp3');
+const gameMusic  = new Audio('evil audio.mp3');
+introMusic.loop  = true;
+gameMusic.loop   = true;
+let musicReady   = false; // true after first user interaction
+
+function applyMuteToTracks(){
+  introMusic.muted = muted;
+  gameMusic.muted  = muted;
+}
+function playIntroMusic(){
+  gameMusic.pause(); gameMusic.currentTime = 0;
+  if(musicReady) introMusic.play().catch(()=>{});
+}
+function playGameMusic(){
+  introMusic.pause(); introMusic.currentTime = 0;
+  if(musicReady){ gameMusic.currentTime = 0; gameMusic.play().catch(()=>{}); }
+}
+function stopAllMusic(){
+  introMusic.pause(); introMusic.currentTime = 0;
+  gameMusic.pause();  gameMusic.currentTime  = 0;
+}
+
+// First user interaction → sblocca AudioContext e avvia musica intro
+function onFirstInteraction(){
+  if(musicReady) return;
+  musicReady = true;
+  wake();
+  if(gs==='title'||gs==='over'||gs==='win'||gs==='next') introMusic.play().catch(()=>{});
+  else if(gs==='playing') gameMusic.play().catch(()=>{});
+  ['click','touchstart','keydown'].forEach(e=>document.removeEventListener(e, onFirstInteraction));
+}
+['click','touchstart','keydown'].forEach(e=>
+  document.addEventListener(e, onFirstInteraction, {passive:true, once:true})
+);
+
+function wake(){ if(AC.state==='suspended') AC.resume(); }
+function tone(f, d, type='square', v=0.16, delay=0){
+  if(muted) return;
+  const o=AC.createOscillator(), g=AC.createGain();
+  o.type=type; o.frequency.value=f;
+  g.gain.setValueAtTime(v, AC.currentTime+delay);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+delay+d);
+  o.connect(g); g.connect(AC.destination);
+  o.start(AC.currentTime+delay); o.stop(AC.currentTime+delay+d+0.02);
+}
+function sfxPaper(){
+  if(muted) return;
+  const buf=AC.createBuffer(1,AC.sampleRate*0.22,AC.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.exp(-i/(AC.sampleRate*0.05));
+  const s=AC.createBufferSource(), g=AC.createGain();
+  s.buffer=buf; g.gain.value=0.28; s.connect(g); g.connect(AC.destination); s.start();
+}
+function sfxPhone(){ if(muted)return; [80,90,75].forEach((f,i)=>tone(f,0.07,'sawtooth',0.2,i*0.1)); }
+function sfxBusted(){ [880,1047,784,1175].forEach((f,i)=>tone(f,0.09,'square',0.2,i*0.07)); }
+function sfxFail(){ [392,330,277,220].forEach((f,i)=>tone(f,0.13,'sawtooth',0.2,i*0.1)); }
+function sfxFake(){ tone(440,0.05,'sine',0.1,0); tone(380,0.12,'sine',0.07,0.06); }
+function sfxWin(){ [523,659,784,1047].forEach((f,i)=>tone(f,0.15,'square',0.2,i*0.1)); }
+
+document.getElementById('mute').addEventListener('click',()=>{
+  muted=!muted;
+  document.getElementById('mute').textContent=muted?'🔇':'🔊';
+  applyMuteToTracks();
+});
+
+// ── Layout ────────────────────────────────────────────────────────────────────
+// 10 desks: 2 cols × 5 rows
+// col0 x=130, col1 x=350, row y=100,175,250,325,400
+const COLS=2, ROWS=5;
+const DW=92, DH=56;
+const COL_X=[130,350];
+const ROW_Y=[100,175,250,325,400];
+
+function dp(i){ return {x:COL_X[i%COLS], y:ROW_Y[Math.floor(i/COLS)]}; }
+
+// ── Level config ──────────────────────────────────────────────────────────────
+const LVL=[
+  {max:2, baseMs:4800, fake:0,    spawnF:190, sec:60},
+  {max:3, baseMs:3600, fake:0,    spawnF:145, sec:60},
+  {max:3, baseMs:2700, fake:0,    spawnF:115, sec:70},
+  {max:4, baseMs:2200, fake:0.25, spawnF: 95, sec:70},
+  {max:6, baseMs:1550, fake:0.30, spawnF: 65, sec:80},
+];
+
+const CT=[
+  {icon:'📝', msg:'SEQUESTRATO!',            sfx:sfxPaper},
+  {icon:'📱', msg:'CONSEGNAMI IL TELEFONO!', sfx:sfxPhone},
+  {icon:'👀', msg:'OCCHI SUL TUO FOGLIO!',  sfx:()=>{tone(523,0.08,'square',0.18); tone(392,0.12,'square',0.15,0.1);}},
+];
+
+const NAMES=['Luca','Sara','Marco','Giulia','Andrea','Sofia','Matteo','Alice','Lorenzo','Chiara'];
+const HCOLS=['#8B4513','#D2691E','#000','#8B0000','#2c2c2c','#D4A0FF','#F4A460','#1a1a6e','#556B2F','#FF69B4'];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let gs='title'; // title|playing|over|win|next
+let score,lives,level,lvTimer,frame,profI,spawnC;
+let students=[], bubbles=[];
+let profAnim={x:COL_X[0],y:ROW_Y[2],tx:COL_X[0],ty:ROW_Y[2]};
+let moveDebounce=0;
+
+function initLevel(lv){
+  level=lv; score=score||0; lives=lives===undefined?5:lives;
+  frame=0; profI=4; spawnC=0; bubbles=[];
+  const {x,y}=dp(4); profAnim={x,y,tx:x,ty:y};
+  students=Array.from({length:10},(_,i)=>({
+    i, name:NAMES[i], state:'idle',
+    ctype:0, timer:0, maxTimer:0,
+    mood:'n', bbl:null, hairCol:HCOLS[i],
+    skinCol:`hsl(${[20,22,18,24,21,19,23,17,25,20][i]},65%,${[70,72,68,74,66,73,69,75,71,68][i]}%)`,
+    shineT:Math.random()*200,
+  }));
+  lvTimer=LVL[lv].sec*60;
+  updateHUD();
+}
+
+function updateHUD(){
+  document.getElementById('sc').textContent=score;
+  document.getElementById('lv').textContent=level+1;
+  document.getElementById('li').textContent=lives;
+  document.getElementById('ti').textContent=Math.max(0,Math.ceil(lvTimer/60));
+}
+
+// ── Overlay helper ────────────────────────────────────────────────────────────
+const ov=document.getElementById('ov');
+function showOv(title,sub,btnTxt,onClick){
+  ov.querySelector('h1').textContent=title;
+  ov.querySelector('.sub').innerHTML=sub;
+  const b=ov.querySelector('button');
+  b.textContent=btnTxt; b.onclick=onClick;
+  ov.classList.add('show');
+}
+function hideOv(){ ov.classList.remove('show'); }
+
+// ── Spawn ─────────────────────────────────────────────────────────────────────
+function trySpawn(){
+  const cfg=LVL[level];
+  const active=students.filter(s=>s.state==='cheat'||s.state==='fake').length;
+  if(active>=cfg.max) return;
+  spawnC++;
+  if(spawnC<cfg.spawnF) return;
+  spawnC=0;
+  const idle=students.filter(s=>s.state==='idle');
+  if(!idle.length) return;
+  const s=idle[Math.floor(Math.random()*idle.length)];
+  s.ctype=Math.floor(Math.random()*3);
+  const isFake=Math.random()<cfg.fake;
+  s.state=isFake?'fake':'cheat';
+  s.maxTimer=cfg.baseMs/1000*60*(0.7+Math.random()*0.6);
+  s.timer=s.maxTimer;
+  if(!isFake) CT[s.ctype].sfx();
+}
+
+// ── Bust ──────────────────────────────────────────────────────────────────────
+function bust(){
+  const s=students[profI];
+  if(s.state==='cheat'){
+    s.state='caught'; s.mood='s'; s.timer=120;
+    score+=10; sfxBusted();
+    addBubble(s,CT[s.ctype].msg,'#ffeb3b','#c00',130);
+    updateHUD();
+  } else if(s.state==='fake'){
+    s.state='idle'; s.timer=0; score=Math.max(0,score-5);
+    addBubble(s,'EHM... STAVO SOLO PENSANDO! 😇','#eee','#333',120);
+    sfxFake(); updateHUD();
+  }
+}
+
+// ── Bubbles ───────────────────────────────────────────────────────────────────
+function addBubble(s,text,bg,fg,dur){
+  s.bbl={text,bg,fg,dur,t:dur};
+  bubbles.push(s.bbl);
+}
+
+// ── Move ──────────────────────────────────────────────────────────────────────
+function tryMove(dir){
+  const col=profI%COLS, row=Math.floor(profI/COLS);
+  let nc=col,nr=row;
+  if(dir==='up')   nr--;
+  if(dir==='down') nr++;
+  if(dir==='left') nc--;
+  if(dir==='right')nc++;
+  if(nc<0||nc>=COLS||nr<0||nr>=ROWS) return;
+  profI=nr*COLS+nc;
+  const {x,y}=dp(profI);
+  profAnim.tx=x; profAnim.ty=y;
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+function update(){
+  if(gs!=='playing') return;
+  frame++; lvTimer--;
+
+  // smooth prof movement
+  profAnim.x+=(profAnim.tx-profAnim.x)*0.25;
+  profAnim.y+=(profAnim.ty-profAnim.y)*0.25;
+
+  trySpawn();
+
+  for(const s of students){
+    s.shineT++;
+    if(s.state==='cheat'||s.state==='fake'){
+      s.timer--;
+      if(s.timer<=0){
+        if(s.state==='cheat'){
+          s.state='escaped'; s.mood='e'; s.timer=130; lives--;
+          addBubble(s,"L'HO FATTA FRANCA! 😈",'#ff9800','#000',130);
+          sfxFail(); updateHUD();
+          if(lives<=0){endGame('over'); return;}
+        } else { s.state='idle'; }
+      }
+    } else if(s.state==='caught'||s.state==='escaped'){
+      s.timer--;
+      if(s.timer<=0){ s.state='idle'; s.mood='n'; s.bbl=null; }
+    }
+  }
+
+  bubbles=bubbles.filter(b=>{ b.t--; return b.t>0; });
+
+  if(lvTimer<=0){
+    if(level>=LVL.length-1) endGame('win');
+    else endGame('next');
+  }
+  updateHUD();
+}
+
+function endGame(type){
+  gs=type; playIntroMusic();
+  if(type==='over'){
+    sfxFail();
+    showOv('💥 VERIFICA ANNULLATA!',`TUTTI A CASA! 😱<br>Punteggio: <b>${score}</b>`,'RIPROVA DAL LIVELLO 1',()=>{
+      score=undefined; lives=undefined; initLevel(0); startPlay();
+    });
+  } else if(type==='win'){
+    sfxWin();
+    showOv('🏆 NESSUNO HA COPIATO!',`MIRACOLO! 🎉<br>Punteggio finale: <b>${score}</b>`,'GIOCA ANCORA',()=>{
+      score=undefined; lives=undefined; initLevel(0); startPlay();
+    });
+  } else { // next
+    sfxWin();
+    showOv(`✅ LIVELLO ${level+1} SUPERATO!`,`Punteggio: <b>${score}</b><br>Pronto per il livello <b>${level+2}</b>?`,`LIVELLO ${level+2} →`,()=>{
+      initLevel(level+1); startPlay();
+    });
+  }
+}
+
+function startPlay(){
+  hideOv(); gs='playing'; wake(); playGameMusic();
+}
+
+// ── Drawing helpers ───────────────────────────────────────────────────────────
+function rr(x,y,w,h,r){
+  cx.beginPath();
+  cx.moveTo(x+r,y); cx.lineTo(x+w-r,y); cx.quadraticCurveTo(x+w,y,x+w,y+r);
+  cx.lineTo(x+w,y+h-r); cx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  cx.lineTo(x+r,y+h); cx.quadraticCurveTo(x,y+h,x,y+h-r);
+  cx.lineTo(x,y+r); cx.quadraticCurveTo(x,y,x+r,y); cx.closePath();
+}
+
+// ── Draw classroom ────────────────────────────────────────────────────────────
+function drawRoom(){
+  // Floor
+  const fg=cx.createLinearGradient(0,0,0,H);
+  fg.addColorStop(0,'#e8dcc8'); fg.addColorStop(1,'#d4c9a0');
+  cx.fillStyle=fg; cx.fillRect(0,0,W,H);
+  // Floor grid
+  cx.strokeStyle='rgba(160,140,90,0.22)'; cx.lineWidth=1;
+  for(let x=0;x<W;x+=44){ cx.beginPath();cx.moveTo(x,0);cx.lineTo(x,H);cx.stroke(); }
+  for(let y=0;y<H;y+=44){ cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke(); }
+
+  // Blackboard (left wall)
+  cx.fillStyle='#1e3d0e'; rr(6,24,18,220,3); cx.fill();
+  cx.fillStyle='#2e5c1a'; rr(9,28,12,212,2); cx.fill();
+  cx.save(); cx.translate(15,134); cx.rotate(-Math.PI/2);
+  cx.fillStyle='rgba(255,255,255,0.55)'; cx.font='bold 8px sans-serif'; cx.textAlign='center';
+  cx.fillText('VERIFICA IN CORSO',0,3); cx.restore();
+  // Chalk marks
+  cx.strokeStyle='rgba(255,255,255,0.2)'; cx.lineWidth=0.7;
+  [[-3,40,8,55],[5,70,-2,90],[-4,110,6,120]].forEach(([x1,y1,x2,y2])=>{
+    cx.beginPath(); cx.moveTo(9+x1,y1); cx.lineTo(9+x2,y2); cx.stroke();
+  });
+
+  // Teacher's desk (top center)
+  cx.fillStyle='rgba(0,0,0,0.12)'; rr(W/2-78,13,156,36,6); cx.fill();
+  cx.fillStyle='#7a4b28'; rr(W/2-76,11,154,34,6); cx.fill();
+  cx.fillStyle='#9c6335'; rr(W/2-72,13,146,28,4); cx.fill();
+  // Papers on teacher's desk
+  cx.fillStyle='#fffde7'; rr(W/2-28,15,56,22,2); cx.fill();
+  cx.strokeStyle='#ccc'; cx.lineWidth=0.5; cx.stroke();
+  cx.fillStyle='#555'; cx.font='bold 7px sans-serif'; cx.textAlign='center';
+  cx.fillText('CATTEDRA DEL PROF',W/2,30);
+
+  // Window (right wall)
+  cx.fillStyle='#aed6f1'; rr(W-20,50,16,100,3); cx.fill();
+  cx.strokeStyle='#6fa3bf'; cx.lineWidth=1; cx.stroke();
+  cx.strokeStyle='rgba(255,255,255,0.6)'; cx.lineWidth=0.5;
+  cx.beginPath(); cx.moveTo(W-12,50); cx.lineTo(W-12,150); cx.stroke();
+  cx.beginPath(); cx.moveTo(W-20,100); cx.lineTo(W-4,100); cx.stroke();
+  // Sunlight
+  const sl=cx.createRadialGradient(W-12,100,0,W-12,100,80);
+  sl.addColorStop(0,'rgba(255,240,180,0.12)'); sl.addColorStop(1,'rgba(255,240,180,0)');
+  cx.fillStyle=sl; cx.fillRect(W-92,50,92,120);
+}
+
+// ── Draw desks + students ─────────────────────────────────────────────────────
+function drawDesk(s){
+  const {x,y}=dp(s.i);
+  const here=(s.i===profI);
+  // Shadow
+  cx.fillStyle='rgba(0,0,0,0.13)'; rr(x-DW/2+3,y-DH/2+4,DW,DH,7); cx.fill();
+  // Desk
+  cx.fillStyle= here?'#c09050':'#8b6030';
+  rr(x-DW/2,y-DH/2,DW,DH,7); cx.fill();
+  cx.strokeStyle= here?'#e8b050':'#6b4515';
+  cx.lineWidth= here?2.5:1.5; cx.stroke();
+  // Desk surface (lighter top)
+  cx.fillStyle='rgba(255,220,150,0.18)'; rr(x-DW/2+3,y-DH/2+3,DW-6,14,4); cx.fill();
+
+  // Sheet of paper
+  cx.fillStyle='#fffde7'; rr(x-26,y-16,52,30,2); cx.fill();
+  cx.strokeStyle='#ddd'; cx.lineWidth=0.5; cx.stroke();
+  cx.strokeStyle='rgba(100,150,220,0.35)'; cx.lineWidth=0.7;
+  for(let l=0;l<4;l++){
+    cx.beginPath(); cx.moveTo(x-21,y-10+l*7); cx.lineTo(x+21,y-10+l*7); cx.stroke();
+  }
+
+  // Student head (top-down)
+  drawStudentHead(s, x, y+20);
+
+  // Cheat indicator
+  if(s.state==='cheat'||s.state==='fake'){
+    const prog=s.timer/s.maxTimer;
+    const bw=54, bh=7, bx=x-bw/2, by=y-DH/2-28;
+    // Bar bg
+    cx.fillStyle='#333'; rr(bx,by,bw,bh,3); cx.fill();
+    // Bar fill
+    const col= s.state==='fake'?'#9e9e9e': prog>0.55?'#4caf50':prog>0.25?'#ff9800':'#f44336';
+    cx.fillStyle=col; rr(bx,by,bw*prog,bh,3); cx.fill();
+    // Pulse outline when urgent
+    if(s.state==='cheat'&&prog<0.3){
+      cx.strokeStyle=`rgba(255,50,0,${0.4+0.5*Math.sin(frame*0.3)})`;
+      cx.lineWidth=1.5; rr(bx,by,bw,bh,3); cx.stroke();
+    }
+    // Icon
+    cx.font='18px sans-serif'; cx.textAlign='center';
+    cx.fillText(s.state==='fake'?'🤔':CT[s.ctype].icon, x, y-DH/2-32);
+    // Name
+    cx.fillStyle=s.state==='fake'?'#aaa':'#333';
+    cx.font='bold 7px sans-serif'; cx.textAlign='center';
+    cx.fillText(s.name, x, y-DH/2-42);
+  }
+}
+
+function drawStudentHead(s,x,y){
+  const r=13;
+  // Neck/body hint (top-down faint)
+  cx.fillStyle='rgba(120,80,50,0.15)';
+  cx.beginPath(); cx.ellipse(x,y+14,8,5,0,0,Math.PI*2); cx.fill();
+
+  // Head
+  cx.beginPath(); cx.arc(x,y,r,0,Math.PI*2);
+  cx.fillStyle=s.skinCol; cx.fill();
+  cx.strokeStyle='rgba(0,0,0,0.3)'; cx.lineWidth=1; cx.stroke();
+
+  // Hair (top-down: arc covering top of head)
+  cx.beginPath(); cx.arc(x,y,r,Math.PI,Math.PI*2);
+  cx.fillStyle=s.hairCol; cx.fill();
+
+  // Eyes
+  const ey=y-1;
+  cx.fillStyle='#111';
+  cx.beginPath(); cx.ellipse(x-4,ey,2.2,2.2,0,0,Math.PI*2); cx.fill();
+  cx.beginPath(); cx.ellipse(x+4,ey,2.2,2.2,0,0,Math.PI*2); cx.fill();
+  // Mood overlay
+  if(s.mood==='s'){ // scared
+    cx.fillStyle='rgba(200,230,255,0.5)';
+    cx.beginPath(); cx.ellipse(x+r*0.6,y-r*0.3,3,4,0.4,0,Math.PI*2); cx.fill(); // sweat
+    cx.strokeStyle='#555'; cx.lineWidth=1;
+    cx.beginPath(); cx.moveTo(x-4,y+3); cx.quadraticCurveTo(x,y+5,x+4,y+3); cx.stroke(); // O mouth
+  } else if(s.mood==='e'){ // smug/escaped
+    cx.strokeStyle='#333'; cx.lineWidth=1.2;
+    cx.beginPath(); cx.arc(x,y+2,5,0,Math.PI); cx.stroke(); // grin
+    // devil horns hint
+    cx.fillStyle='#e53935';
+    cx.beginPath(); cx.moveTo(x-6,y-r+1); cx.lineTo(x-4,y-r-4); cx.lineTo(x-2,y-r+1); cx.fill();
+    cx.beginPath(); cx.moveTo(x+2,y-r+1); cx.lineTo(x+4,y-r-4); cx.lineTo(x+6,y-r+1); cx.fill();
+  } else {
+    cx.strokeStyle='#555'; cx.lineWidth=0.8;
+    cx.beginPath(); cx.arc(x,y+4,3,0.2,Math.PI-0.2); cx.stroke();
+  }
+}
+
+// ── Draw professor ────────────────────────────────────────────────────────────
+function drawProf(){
+  const px=profAnim.x, py=profAnim.y;
+  const ofs=-32; // draw above desk center
+
+  // Shadow
+  cx.fillStyle='rgba(0,0,0,0.18)';
+  cx.beginPath(); cx.ellipse(px,py+2,16,6,0,0,Math.PI*2); cx.fill();
+
+  // Suit body (top-down: dark blue ellipse)
+  cx.fillStyle='#1a237e';
+  cx.beginPath(); cx.ellipse(px,py+ofs+14,14,16,0,0,Math.PI*2); cx.fill();
+  cx.strokeStyle='#0d1550'; cx.lineWidth=1.5; cx.stroke();
+
+  // Tie (thin red strip from head down)
+  cx.fillStyle='#c62828';
+  cx.beginPath();
+  cx.moveTo(px-2,py+ofs+5); cx.lineTo(px-2.5,py+ofs+18);
+  cx.lineTo(px,py+ofs+22);  cx.lineTo(px+2.5,py+ofs+18);
+  cx.lineTo(px+2,py+ofs+5); cx.closePath(); cx.fill();
+
+  // Head
+  cx.beginPath(); cx.arc(px,py+ofs,12,0,Math.PI*2);
+  cx.fillStyle='#ffd180'; cx.fill();
+  cx.strokeStyle='#c9972a'; cx.lineWidth=1; cx.stroke();
+
+  // Hair (bald + a few strands)
+  cx.strokeStyle='#5d4037'; cx.lineWidth=1.5; cx.lineCap='round';
+  [[-4,-1,0],[0,-1,0],[4,-1,0]].forEach(([dx])=>{
+    cx.beginPath();
+    cx.moveTo(px+dx,py+ofs-11);
+    cx.quadraticCurveTo(px+dx*1.4,py+ofs-15,px+dx*1.1,py+ofs-17);
+    cx.stroke();
+  });
+
+  // Glasses
+  cx.strokeStyle='#333'; cx.lineWidth=1.4;
+  cx.beginPath(); cx.arc(px-4.5,py+ofs-1,3.5,0,Math.PI*2); cx.stroke();
+  cx.beginPath(); cx.arc(px+4.5,py+ofs-1,3.5,0,Math.PI*2); cx.stroke();
+  cx.beginPath(); cx.moveTo(px-1,py+ofs-1); cx.lineTo(px+1,py+ofs-1); cx.stroke();
+  cx.beginPath(); cx.moveTo(px-8,py+ofs-1); cx.lineTo(px-9.5,py+ofs); cx.stroke();
+  cx.beginPath(); cx.moveTo(px+8,py+ofs-1); cx.lineTo(px+9.5,py+ofs); cx.stroke();
+
+  // Mouth (determined frown)
+  cx.strokeStyle='#c49a00'; cx.lineWidth=1;
+  cx.beginPath(); cx.arc(px,py+ofs+5,3,Math.PI*0.1,Math.PI*0.9); cx.stroke();
+
+  // "PROF" label
+  cx.fillStyle='rgba(26,35,126,0.8)';
+  cx.font='bold 7px sans-serif'; cx.textAlign='center';
+  cx.fillText('PROF',px,py+ofs+32);
+}
+
+// ── Draw speech bubbles ───────────────────────────────────────────────────────
+function drawBubbles(){
+  for(const b of bubbles){
+    const s=students.find(s=>s.bbl===b);
+    if(!s) continue;
+    const {x,y}=dp(s.i);
+    const alpha=Math.min(1, b.t/25);
+    const rise=(b.dur-b.t)/b.dur*8;
+    const bx=x, by=y-DH/2-68-rise;
+    cx.save(); cx.globalAlpha=alpha;
+    cx.font='bold 8.5px sans-serif'; cx.textAlign='center';
+    const tw=cx.measureText(b.text).width+20;
+    const th=22;
+    // Bubble
+    cx.fillStyle=b.bg; rr(bx-tw/2,by,tw,th,8); cx.fill();
+    cx.strokeStyle='rgba(0,0,0,0.4)'; cx.lineWidth=1.5; cx.stroke();
+    // Tail
+    cx.beginPath();
+    cx.moveTo(bx-7,by+th); cx.lineTo(bx,y-DH/2-14); cx.lineTo(bx+7,by+th);
+    cx.closePath(); cx.fillStyle=b.bg; cx.fill(); cx.stroke();
+    // Text
+    cx.fillStyle=b.fg||'#111'; cx.fillText(b.text,bx,by+14.5);
+    cx.restore();
+  }
+}
+
+// ── Draw HUD overlay on canvas ────────────────────────────────────────────────
+function drawCanvasHUD(){
+  // Level dots
+  cx.fillStyle='rgba(22,33,62,0.8)'; rr(4,H-26,110,22,6); cx.fill();
+  for(let i=0;i<5;i++){
+    cx.beginPath(); cx.arc(16+i*22,H-15,7,0,Math.PI*2);
+    cx.fillStyle=i<level+1?'#f5c518':'#444'; cx.fill();
+    cx.strokeStyle='#888'; cx.lineWidth=1; cx.stroke();
+    cx.fillStyle='#000'; cx.font='bold 7px sans-serif'; cx.textAlign='center';
+    cx.fillText(i+1,16+i*22,H-12);
+  }
+  // Controls hint
+  if(gs==='playing'){
+    cx.fillStyle='rgba(0,0,0,0.4)'; cx.font='7px sans-serif'; cx.textAlign='right';
+    const hint=isTouch()?'Tocca un banco · poi BECCA!':'↑↓←→ muovi  |  SPAZIO becca';
+    cx.fillText(hint, W-6, H-6);
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(){
+  cx.clearRect(0,0,W,H);
+  drawRoom();
+  // Draw all desks (back to front for z-order)
+  for(let i=0;i<10;i++) drawDesk(students[i]);
+  drawProf();
+  drawBubbles();
+  drawCanvasHUD();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+function loop(){
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  wake();
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if(gs!=='playing') return;
+  const now=Date.now();
+  if(e.key!==' '&&now-moveDebounce<130) return;
+  moveDebounce=now;
+  ({ArrowUp:()=>tryMove('up'),ArrowDown:()=>tryMove('down'),
+    ArrowLeft:()=>tryMove('left'),ArrowRight:()=>tryMove('right'),
+    ' ':bust}[e.key]||function(){})();
+});
+
+// Converti coordinate touch/click in coordinate canvas
+function canvasPoint(e){
+  const r=cv.getBoundingClientRect();
+  const t=e.touches?e.touches[0]:e;
+  return { x:(t.clientX-r.left)*(W/r.width), y:(t.clientY-r.top)*(H/r.height) };
+}
+// Trova il banco sotto il punto toccato (hit area generosa)
+function deskAtPoint(px,py){
+  for(let i=0;i<10;i++){
+    const {x,y}=dp(i);
+    if(px>=x-DW/2-14 && px<=x+DW/2+14 && py>=y-DH/2-52 && py<=y+DH/2+34) return i;
+  }
+  return -1;
+}
+function handleCanvasTap(e){
+  e.preventDefault(); wake();
+  if(gs!=='playing') return;
+  const {x,y}=canvasPoint(e);
+  const idx=deskAtPoint(x,y);
+  if(idx===-1) return;
+  if(idx===profI){ bust(); }
+  else { profI=idx; const p=dp(idx); profAnim.tx=p.x; profAnim.ty=p.y; }
+}
+cv.addEventListener('touchstart', handleCanvasTap, {passive:false});
+cv.addEventListener('click',      handleCanvasTap);
+
+// Pulsante BECCA!
+const bustBtn=document.getElementById('bustBtn');
+['touchstart','mousedown'].forEach(ev=>
+  bustBtn.addEventListener(ev,e=>{e.preventDefault();wake();if(gs==='playing')bust();},{passive:false})
+);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+score=undefined; lives=undefined;
+initLevel(0);
+gs='title';
+
+document.getElementById('startBtn').onclick=()=>{
+  wake(); score=0; lives=5; initLevel(0); startPlay();
+};
+
+loop();
+</script>
+</body>
+</html>
